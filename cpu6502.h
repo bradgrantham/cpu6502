@@ -60,6 +60,12 @@ struct CPU6502
 
     std::vector<std::pair<uint16_t, uint8_t>> writes;
 
+    // XXX For debugging, normally couldn't set CPU PC directly
+    void set_pc(uint16_t addr)
+    {
+        pc = addr;
+    }
+
     void stack_push(uint8_t d)
     {
         writes.push_back(std::make_pair(0x100 + s--, d));
@@ -80,7 +86,7 @@ struct CPU6502
         if(v) {
             p |= flag;
         } else {
-            p &= ~flag;
+            p = (p & ~flag) | B2 | B;
         }
     }
 
@@ -91,7 +97,7 @@ struct CPU6502
 
     void flag_clear(uint8_t flag)
     {
-        p &= ~flag;
+        p = (p & ~flag) | B2 | B;
     }
 
     uint8_t carry()
@@ -101,7 +107,7 @@ struct CPU6502
 
     bool isset(uint8_t flag)
     {
-        return p & flag;
+        return (p | B | B2) & flag;
     }
 
     void set_flags(uint8_t flags, uint8_t v)
@@ -152,15 +158,15 @@ struct CPU6502
         a(0),
         x(0),
         y(0),
-        s(0xFF),
-        p(I),
+        s(0xFD),
+        p(I | B | B2),
         exception(RESET)
     {
     }
 
     void reset()
     {
-        s = 0xFF;
+        s = 0xFD;
         uint8_t low = bus.read(0xFFFC);
         uint8_t high = bus.read(0xFFFD);
         pc = low + high * 256;
@@ -171,7 +177,7 @@ struct CPU6502
     {
         stack_push((pc - 1) >> 8);
         stack_push((pc - 1) & 0xFF);
-        stack_push(p | B2);
+        stack_push((p | B2) & ~B);
         uint8_t low = bus.read(0xFFFE);
         uint8_t high = bus.read(0xFFFF);
         pc = low + high * 256;
@@ -182,7 +188,7 @@ struct CPU6502
     {
         stack_push((pc - 1) >> 8);
         stack_push((pc - 1) & 0xFF);
-        stack_push(p | B2);
+        stack_push((p | B2) & ~B);
         uint8_t low = bus.read(0xFFFA);
         uint8_t high = bus.read(0xFFFB);
         pc = low + high * 256;
@@ -1280,7 +1286,7 @@ struct CPU6502
             }
 
             case 0x28: { // PLP
-                p = stack_pull() & ~ (B2 | B);
+                p = stack_pull() | B2 | B;
                 break;
             }
 
@@ -1555,7 +1561,7 @@ struct CPU6502
             }
 
             case 0x40: { // RTI
-                p = stack_pull() & ~ (B2 | B);
+                p = stack_pull() | B2 | B;
                 uint8_t pcl = stack_pull();
                 uint8_t pch = stack_pull();
                 pc = pcl + pch * 256;
