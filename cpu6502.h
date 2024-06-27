@@ -28,7 +28,7 @@
 #include <vector>
 
 #ifndef EMULATE_65C02
-#define EMULATE_65C02 1
+#define EMULATE_65C02 0
 #endif /* EMULATE_65C02 */
 
 template<class CLK, class BUS>
@@ -195,6 +195,33 @@ struct CPU6502
         exception = NONE;
     }
 
+    void adc_bcd(uint8_t m, uint8_t carry)
+    {
+        uint8_t bcd_a = a / 16 * 10 + a % 16;
+        uint8_t bcd_m = m / 16 * 10 + m % 16;
+        flag_change(C, ((uint16_t)bcd_a + (uint16_t)bcd_m + carry) > 99);
+        flag_change(V, adc_overflow_d(bcd_a, bcd_m, carry));
+        set_flags(N | Z, bcd_a = bcd_a + bcd_m + carry);
+        a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
+    }
+
+    void sbc_bcd(uint8_t m, uint8_t borrow)
+    {
+        uint8_t bcd_a = a / 16 * 10 + a % 16;
+        uint8_t bcd_m = m / 16 * 10 + m % 16;
+        printf("bcd_a = %d\n", bcd_a);
+        printf("bcd_m = %d\n", bcd_m);
+        flag_change(C, !(bcd_a < bcd_m + borrow));
+        flag_change(V, sbc_overflow_d(bcd_a, bcd_m, borrow));
+        if(bcd_m + borrow <= bcd_a) { 
+            set_flags(N | Z, bcd_a = (bcd_a - (bcd_m + borrow)) % 100);
+        } else {
+            set_flags(N | Z, bcd_a = (bcd_a + 100 - (bcd_m + borrow)));
+        }
+        printf("bcd_a = %d\n", bcd_a);
+        a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
+    }
+
     void cycle()
     {
         if(exception == RESET) {
@@ -336,8 +363,9 @@ struct CPU6502
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256 + x;
-                if((addr - x) / 256 != addr / 256)
+                if((addr - x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, m = bus.read(addr) + 1);
                 writes.push_back(std::make_pair(addr, m));
                 break;
@@ -380,8 +408,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(!isset(N)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -391,8 +420,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(!isset(V)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -402,8 +432,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(isset(V)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -413,8 +444,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(isset(N)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -424,8 +456,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(!isset(C)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -435,8 +468,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(isset(C)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -446,8 +480,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(!isset(Z)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -457,8 +492,9 @@ struct CPU6502
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
                 if(isset(Z)) {
                     clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256)
+                    if((pc + rel) / 256 != pc / 256) {
                         clk.add_cpu_cycles(1);
+                    }
                     pc += rel;
                 }
                 break;
@@ -486,8 +522,9 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, a = bus.read(addr));
                 break;
             }
@@ -503,8 +540,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 m = bus.read(addr + x);
-                if((addr + x) / 256 != addr / 256)
+                if((addr + x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 flag_change(C, m <= a);
                 set_flags(N | Z, m = a - m);
                 break;
@@ -526,8 +564,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 m = bus.read(addr + y);
-                if((addr + y) / 256 != addr / 256)
+                if((addr + y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 flag_change(C, m <= a);
                 set_flags(N | Z, m = a - m);
                 break;
@@ -538,8 +577,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 set_flags(N | Z, a = bus.read(addr + y));
-                if((addr + y) / 256 != addr / 256)
+                if((addr + y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 break;
             }
 
@@ -548,8 +588,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 set_flags(N | Z, y = bus.read(addr + x));
-                if((addr + x) / 256 != addr / 256)
+                if((addr + x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 break;
             }
 
@@ -558,8 +599,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 set_flags(N | Z, a = bus.read(addr + x));
-                if((addr + x) / 256 != addr / 256)
+                if((addr + x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 break;
             }
 
@@ -568,11 +610,7 @@ struct CPU6502
                 m = bus.read(zpg);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -586,11 +624,7 @@ struct CPU6502
                 m = bus.read(zpg);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -604,16 +638,13 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -627,16 +658,13 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -649,16 +677,13 @@ struct CPU6502
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 uint8_t m = bus.read(addr);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -671,16 +696,13 @@ struct CPU6502
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256 + x;
-                if((addr - x) / 256 != addr / 256)
+                if((addr - x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 uint8_t m = bus.read(addr);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -696,11 +718,7 @@ struct CPU6502
                 uint8_t m = bus.read(addr);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -713,11 +731,7 @@ struct CPU6502
                 uint8_t m = read_pc_inc();
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, !(bcd <  m + borrow));
-                    flag_change(V, sbc_overflow_d(bcd, m, borrow));
-                    set_flags(N | Z, bcd = bcd - (m + borrow));
-                    a = bcd / 10 * 16 + bcd % 10;
+                    sbc_bcd(m, borrow);
                 } else {
                     flag_change(C, !(a < (m + borrow)));
                     flag_change(V, sbc_overflow(a, m, borrow));
@@ -731,16 +745,13 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10 - (isset(C) ? 0xA0 : 0);
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -754,16 +765,13 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10 - (isset(C) ? 0xA0 : 0);
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -779,11 +787,7 @@ struct CPU6502
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10 - (isset(C) ? 0xA0 : 0);
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -797,11 +801,7 @@ struct CPU6502
                 m = bus.read(zpg);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10 - (isset(C) ? 0xA0 : 0);
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -814,16 +814,13 @@ struct CPU6502
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256 + x;
-                if((addr - x) / 256 != addr / 256)
+                if((addr - x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10 - (isset(C) ? 0xA0 : 0);
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -836,16 +833,13 @@ struct CPU6502
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10 - (isset(C) ? 0xA0 : 0);
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -858,11 +852,7 @@ struct CPU6502
                 m = read_pc_inc();
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10 - (isset(C) ? 0xA0 : 0);
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -1000,8 +990,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 m = bus.read(addr + y);
-                if((addr + y) / 256 != addr / 256)
+                if((addr + y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, a = a | m);
                 break;
             }
@@ -1011,8 +1002,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 m = bus.read(addr + x);
-                if((addr + x) / 256 != addr / 256)
+                if((addr + x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, a = a | m);
                 break;
             }
@@ -1022,8 +1014,9 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 set_flags(N | Z, a = a | m);
                 break;
@@ -1053,8 +1046,9 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, a = a & bus.read(addr));
                 break;
             }
@@ -1064,8 +1058,9 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, a = a & bus.read(addr));
                 break;
             }
@@ -1075,8 +1070,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 set_flags(N | Z, a = a & bus.read(addr + x));
-                if((addr + x) / 256 != addr / 256)
+                if((addr + x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 break;
             }
 
@@ -1085,8 +1081,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 set_flags(N | Z, a = a & bus.read(addr + y));
-                if((addr + y) / 256 != addr / 256)
+                if((addr + y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 break;
             }
 
@@ -1328,8 +1325,9 @@ struct CPU6502
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, x = bus.read(addr));
                 break;
             }
@@ -1451,8 +1449,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 m = bus.read(addr + x);
-                if((addr + x) / 256 != addr / 256)
+                if((addr + x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, a = a ^ m);
                 break;
             }
@@ -1462,8 +1461,9 @@ struct CPU6502
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
                 m = bus.read(addr + y);
-                if((addr + y) / 256 != addr / 256)
+                if((addr + y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 set_flags(N | Z, a = a ^ m);
                 break;
             }
@@ -1485,8 +1485,9 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 set_flags(N | Z, a = a ^ m);
                 break;
@@ -1497,8 +1498,9 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256 + y;
-                if((addr - y) / 256 != addr / 256)
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 m = bus.read(addr);
                 flag_change(C, m <= a);
                 set_flags(N | Z, m = a - m);
@@ -1638,11 +1640,7 @@ struct CPU6502
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10;
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
@@ -1700,8 +1698,9 @@ struct CPU6502
 
             case 0x80: { // BRA imm, 65C02
                 int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if((pc + rel) / 256 != pc / 256)
+                if((pc + rel) / 256 != pc / 256) {
                     clk.add_cpu_cycles(1);
+                }
                 pc += rel;
                 break;
             }
@@ -1751,11 +1750,7 @@ struct CPU6502
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
-                    uint8_t bcd = a / 16 * 10 + a % 16;
-                    flag_change(C, ((uint16_t)bcd + (uint16_t)m + carry) > 99);
-                    flag_change(V, adc_overflow_d(bcd, m, carry));
-                    set_flags(N | Z, bcd = bcd + m + carry);
-                    a = bcd / 10 * 16 + bcd % 10;
+                    adc_bcd(m, carry);
                 } else {
                     flag_change(C, ((uint16_t)a + (uint16_t)m + carry) > 0xFF);
                     flag_change(V, adc_overflow(a, m, carry));
