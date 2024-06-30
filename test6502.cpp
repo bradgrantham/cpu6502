@@ -138,6 +138,11 @@ struct CPU6502
         reset6502();
     }
 
+    void reset()
+    {
+        reset6502();
+    }
+
     void cycle()
     {
         step6502();
@@ -201,6 +206,7 @@ int main(int argc, const char **argv)
     }
 
     bus machine;
+    uint16_t start;
 
     FILE *testbin = fopen(argv[1], "rb");
     if(!testbin) {
@@ -215,26 +221,50 @@ int main(int argc, const char **argv)
     fread(rom.data(), 1, length, testbin);
     fclose(testbin);
 
-    uint16_t addr = 0;
-    for(const auto &data: rom) {
-        machine.write(addr, data);
-        addr += 1;
+    if(true) {
+
+        // Assume https://github.com/amb5l/6502_65C02_functional_tests.git
+        // Binary file is 64K and fills memory
+        // Tests start at 0x400 (1024)
+
+        uint16_t addr = 0;
+        for(const auto &data: rom) {
+            machine.write(addr, data);
+            addr += 1;
+        }
+        start = 0x400;
+
+    } else {
+
+        // Placeholder for write from handcoded ROM
+
+        uint16_t addr = 0x600;
+        for(const auto &data: { 0xa9, 0x00, 0x8d, 0x19, 0x06, 0x8d, 0x1a, 0x06, 0xf8, 0xa9, 0x7a, 0x48, 0x28, 0xad, 0x19, 0x06, 0xed, 0x1a, 0x06, 0x8d, 0x1b, 0x06, 0x4c, 0x16, 0x06, 0x00, 0x00, 0x00 }) {
+            machine.write(addr, data);
+            addr += 1;
+        }
+        start = addr;
+
     }
 
     dummyclock clock;
 
     CPU6502<dummyclock, bus> cpu(clock, machine);
 
-    cpu.cycle();
+    cpu.reset();
 
-    cpu.set_pc(0x400);
+    cpu.set_pc(start);
 
     uint16_t oldpc;
     std::set<std::pair<cpu_state_vector, bus::memory_type>> seen_states;
     do {
         oldpc = get_cpu_state_vector(cpu)[CPU_STATE_VECTOR_PC];
-        print_cpu_state(cpu);
-        printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
+
+        [[maybe_unused]] static uint64_t count = 0;
+        // if((count++) % 1000 == 0) {
+            print_cpu_state(cpu);
+            printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
+        // }
 
         if(false) {
             auto current_state = std::make_pair(get_cpu_state_vector(cpu), machine.memory);
@@ -249,6 +279,9 @@ int main(int argc, const char **argv)
 
         cpu.cycle();
     } while(get_cpu_state_vector(cpu)[CPU_STATE_VECTOR_PC] != oldpc);
+
     print_cpu_state(cpu);
+    printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
+
     exit(EXIT_SUCCESS);
 }
