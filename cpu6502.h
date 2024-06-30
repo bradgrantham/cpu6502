@@ -17,7 +17,7 @@
 /*
   Candidates for refactor
       effective address
-      carry flag from BCD and !BCD addition
+      arithmetic operation including BCD
 */
 
 #ifndef CPU6502_H
@@ -28,7 +28,7 @@
 #include <vector>
 
 #ifndef EMULATE_65C02
-#define EMULATE_65C02 0
+#define EMULATE_65C02 1
 #endif /* EMULATE_65C02 */
 
 template<class CLK, class BUS>
@@ -209,8 +209,6 @@ struct CPU6502
     {
         uint8_t bcd_a = a / 16 * 10 + a % 16;
         uint8_t bcd_m = m / 16 * 10 + m % 16;
-        printf("bcd_a = %d\n", bcd_a);
-        printf("bcd_m = %d\n", bcd_m);
         flag_change(C, !(bcd_a < bcd_m + borrow));
         flag_change(V, sbc_overflow_d(bcd_a, bcd_m, borrow));
         if(bcd_m + borrow <= bcd_a) { 
@@ -218,7 +216,6 @@ struct CPU6502
         } else {
             set_flags(N | Z, bcd_a = (bcd_a + 100 - (bcd_m + borrow)));
         }
-        printf("bcd_a = %d\n", bcd_a);
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
     }
 
@@ -500,7 +497,6 @@ struct CPU6502
                 break;
             }
 
-
             case 0xA1: { // LDA (ind, X)
                 uint8_t zpg = (read_pc_inc() + x) & 0xFF;
                 uint8_t low = bus.read(zpg);
@@ -562,9 +558,9 @@ struct CPU6502
             case 0xD9: { // CMP abs, Y
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
-                uint16_t addr = low + high * 256;
-                m = bus.read(addr + y);
-                if((addr + y) / 256 != addr / 256) {
+                uint16_t addr = low + high * 256 + y;
+                m = bus.read(addr);
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
                 }
                 flag_change(C, m <= a);
@@ -575,9 +571,9 @@ struct CPU6502
             case 0xB9: { // LDA abs, Y
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
-                uint16_t addr = low + high * 256;
-                set_flags(N | Z, a = bus.read(addr + y));
-                if((addr + y) / 256 != addr / 256) {
+                uint16_t addr = low + high * 256 + y;
+                set_flags(N | Z, a = bus.read(addr));
+                if((addr - y) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
                 }
                 break;
@@ -586,9 +582,9 @@ struct CPU6502
             case 0xBC: { // LDY abs, X
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
-                uint16_t addr = low + high * 256;
-                set_flags(N | Z, y = bus.read(addr + x));
-                if((addr + x) / 256 != addr / 256) {
+                uint16_t addr = low + high * 256 + x;
+                set_flags(N | Z, y = bus.read(addr));
+                if((addr - x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
                 }
                 break;
@@ -597,9 +593,9 @@ struct CPU6502
             case 0xBD: { // LDA abs, X
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
-                uint16_t addr = low + high * 256;
-                set_flags(N | Z, a = bus.read(addr + x));
-                if((addr + x) / 256 != addr / 256) {
+                uint16_t addr = low + high * 256 + x;
+                set_flags(N | Z, a = bus.read(addr));
+                if((addr - x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
                 }
                 break;
@@ -638,9 +634,6 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256;
-                if((addr - y) / 256 != addr / 256) {
-                    clk.add_cpu_cycles(1);
-                }
                 m = bus.read(addr);
                 uint8_t borrow = isset(C) ? 0 : 1;
                 if(isset(D)) {
@@ -765,9 +758,6 @@ struct CPU6502
                 uint8_t low = bus.read(zpg);
                 uint8_t high = bus.read((zpg + 1) & 0xFF);
                 uint16_t addr = low + high * 256;
-                if((addr - y) / 256 != addr / 256) {
-                    clk.add_cpu_cycles(1);
-                }
                 m = bus.read(addr);
                 uint8_t carry = isset(C) ? 1 : 0;
                 if(isset(D)) {
@@ -870,11 +860,16 @@ struct CPU6502
                 break;
             }
 
-            case 0x1E: { // ASL abs
+            case 0x1E: { // ASL abs, X
                 uint16_t addr = read_pc_inc() + read_pc_inc() * 256;
                 m = bus.read(addr + x);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = m << 1);
+#if EMULATE_65C02
+                if((addr + x) / 256 != addr / 256) {
+                    clk.add_cpu_cycles(1);
+                }
+#endif
                 writes.push_back(std::make_pair(addr + x, m));
                 break;
             }
@@ -910,6 +905,9 @@ struct CPU6502
                 m = bus.read(addr + x);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = m >> 1);
+                if((m + 1) / 256 != m / 256) {
+                    clk.add_cpu_cycles(1);
+                }
                 writes.push_back(std::make_pair(addr + x, m));
                 break;
             }
@@ -1287,7 +1285,7 @@ struct CPU6502
                 break;
             }
 
-            case 0x24: { // BIT
+            case 0x24: { // BIT zpg
                 uint8_t zpg = read_pc_inc();
                 m = bus.read(zpg);
                 flag_change(Z, (a & m) == 0);
@@ -1296,7 +1294,30 @@ struct CPU6502
                 break;
             }
 
-            case 0x2C: { // BIT
+            case 0x34: { // BIT abs, X
+                uint8_t low = read_pc_inc();
+                uint8_t high = read_pc_inc();
+                uint16_t addr = low + high * 256 + x;
+                m = bus.read(addr);
+                if((addr - x) / 256 != addr / 256) {
+                    clk.add_cpu_cycles(1);
+                }
+                flag_change(Z, (a & m) == 0);
+                flag_change(N, m & 0x80);
+                flag_change(V, m & 0x40);
+                break;
+            }
+
+            case 0x3C: { // BIT abs, X
+                uint8_t zpg = (read_pc_inc() + x) & 0xFF;
+                m = bus.read(zpg);
+                flag_change(Z, (a & m) == 0);
+                flag_change(N, m & 0x80);
+                flag_change(V, m & 0x40);
+                break;
+            }
+
+            case 0x2C: { // BIT abs
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
                 uint16_t addr = low + high * 256;
@@ -1307,9 +1328,9 @@ struct CPU6502
                 break;
             }
 
-            case 0xB4: { // LDY
-                uint8_t zpg = read_pc_inc();
-                set_flags(N | Z, y = bus.read((zpg + x) & 0xFF));
+            case 0xB4: { // LDY zpg, X
+                uint8_t zpg = (read_pc_inc() + x) & 0xFF;
+                set_flags(N | Z, y = bus.read(zpg));
                 break;
             }
 
@@ -1419,8 +1440,8 @@ struct CPU6502
             }
 
             case 0x55: { // EOR zpg, X
-                uint8_t zpg = read_pc_inc() + x;
-                m = bus.read(zpg & 0xFF);
+                uint8_t zpg = (read_pc_inc() + x) & 0xFF;
+                m = bus.read(zpg);
                 set_flags(N | Z, a = a ^ m);
                 break;
             }
@@ -1447,9 +1468,9 @@ struct CPU6502
             case 0x5D: { // EOR abs, X
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
-                uint16_t addr = low + high * 256;
-                m = bus.read(addr + x);
-                if((addr + x) / 256 != addr / 256) {
+                uint16_t addr = low + high * 256 + x;
+                m = bus.read(addr);
+                if((addr - x) / 256 != addr / 256) {
                     clk.add_cpu_cycles(1);
                 }
                 set_flags(N | Z, a = a ^ m);
@@ -1711,6 +1732,12 @@ struct CPU6502
                 break;
             }
 
+            case 0x74: { // STZ zpg, X, 65C02
+                uint8_t zpg = read_pc_inc();
+                writes.push_back(std::make_pair((zpg + x) & 0xFF, 0));
+                break;
+            }
+
             case 0x9C: { // STZ abs, 65C02
                 uint8_t low = read_pc_inc();
                 uint8_t high = read_pc_inc();
@@ -1927,9 +1954,9 @@ struct CPU6502
 template<class CLK, class BUS>
 const int32_t CPU6502<CLK, BUS>::cycles[256] =
 {
-#if EMULATE_65C02
-    /*         0  1  2  3  4  5  6  7  8  9  0  A  B  C  D  E  */
-    /* 0x0- */ 7, 6, 2, 1, 5, 3, 5, 0, 3, 2, 2, 1, 6, 4, 6, 5,
+#if ! EMULATE_65C02
+    /*         0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
+    /* 0x0- */ 7, 6, 2, 1, 3, 3, 5, 0, 3, 2, 2, 1, 6, 4, 6, 5,
     /* 0x1- */ 2, 5, 5, 1, 5, 4, 6, 0, 2, 4, 2, 1, 6, 4, 7, 5,
     /* 0x2- */ 6, 6, 2, 1, 3, 3, 5, 0, 4, 2, 2, 1, 4, 4, 6, 5,
     /* 0x3- */ 2, 5, 0, 1, 0, 4, 6, 0, 2, 4, 2, 1, 0, 4, 7, 5,
@@ -1945,18 +1972,18 @@ const int32_t CPU6502<CLK, BUS>::cycles[256] =
     /* 0xD- */ 2, 5, 5, 1, 4, 4, 6, 0, 2, 4, 3, 1, 4, 4, 7, 5,
     /* 0xE- */ 2, 6, 2, 1, 3, 3, 5, 0, 2, 2, 2, 2, 4, 4, 6, 5,
     /* 0xF- */ 2, 5, 0, 1, 4, 4, 6, 0, 2, 4, 4, 1, 4, 4, 7, 5,
-#else /* ! EMULATE_65C02 */
-    /*         0  1  2  3  4  5  6  7  8  9  0  A  B  C  D  E  */
-    /* 0x0- */ 7, 6, 2, 1, 3, 3, 5, 0, 3, 2, 2, 1, 6, 4, 6, 5,
-    /* 0x1- */ 2, 5, 5, 1, 5, 4, 6, 0, 2, 4, 2, 1, 6, 4, 7, 5,
+#else /* EMULATE_65C02 */
+    /*         0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F  */
+    /* 0x0- */ 7, 6, 2, 1, 5, 3, 5, 0, 3, 2, 2, 1, 6, 4, 6, 5,
+    /* 0x1- */ 2, 5, 5, 1, 5, 4, 6, 0, 2, 4, 2, 1, 6, 4, 6, 5,
     /* 0x2- */ 6, 6, 2, 1, 3, 3, 5, 0, 4, 2, 2, 1, 4, 4, 6, 5,
-    /* 0x3- */ 2, 5, 0, 1, 0, 4, 6, 0, 2, 4, 2, 1, 0, 4, 7, 5,
+    /* 0x3- */ 2, 5, 0, 1, 4, 4, 6, 0, 2, 4, 2, 1, 0, 4, 6, 5,
     /* 0x4- */ 6, 6, 2, 1, 3, 3, 5, 0, 3, 2, 2, 1, 3, 4, 6, 5,
-    /* 0x5- */ 2, 5, 0, 1, 4, 4, 6, 0, 2, 4, 3, 1, 8, 4, 7, 5,
+    /* 0x5- */ 2, 5, 0, 1, 4, 4, 6, 0, 2, 4, 3, 1, 8, 4, 6, 5,
     /* 0x6- */ 6, 6, 2, 1, 3, 3, 5, 0, 4, 2, 2, 1, 5, 4, 6, 5,
-    /* 0x7- */ 2, 5, 5, 1, 0, 4, 6, 0, 2, 4, 4, 1, 6, 4, 7, 5,
+    /* 0x7- */ 2, 5, 5, 1, 4, 4, 6, 0, 2, 4, 4, 1, 6, 4, 6, 5,
     /* 0x8- */ 2, 6, 2, 1, 3, 3, 3, 0, 2, 2, 2, 1, 4, 4, 4, 5,
-    /* 0x9- */ 2, 6, 5, 1, 4, 4, 4, 0, 2, 5, 2, 1, 4, 5, 5, 5,
+    /* 0x9- */ 2, 6, 5, 1, 4, 4, 4, 0, 2, 5, 2, 1, 4, 5, 6, 5,
     /* 0xA- */ 2, 6, 2, 1, 3, 3, 3, 0, 2, 2, 2, 1, 4, 4, 4, 5,
     /* 0xB- */ 2, 5, 5, 1, 4, 4, 4, 0, 2, 4, 2, 1, 4, 4, 4, 5,
     /* 0xC- */ 2, 6, 2, 1, 3, 3, 5, 0, 2, 2, 2, 1, 4, 4, 3, 5,
