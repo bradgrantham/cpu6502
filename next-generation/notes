@@ -1,0 +1,156 @@
+INSTRUCTION(operand1, operand2, addressing_mode, operation, output, flag_update_mask)
+
+Would PC operations be special cases?
+    JMP, Bxx
+what is first operand
+    a, x, y, sp, p, 0
+Operand 2
+    single bit
+    0xFF
+    memory
+is operand 2 inverted?
+Output
+    dropped, a, x, y, sp, p, memory (, pc?)
+which flags are updated?
+What is the ALU operation?
+    ADC, SBC, SET, CLEAR, AND, OR, EOR, TEST
+Instruction cycle counts
+    1 cycle to read the instruction
+    1 cycle for each read byte
+    1 cycle for each written byte
+    1 cycle if there are no written bytes to retire the instruction?
+    1 cycle if an addition causes a carry
+    1 cycle
+Addressing modes
+    implicit (operand is encoded in instruction)
+    immediate (next byte is the operand)
+        address = pc;
+        pc++;
+    stack with decrement or increment
+    zero page (next byte is the address of the operand)
+        address = read_pc_inc();
+    zero page, X (next byte is the address of the operand, add X, wrap-around)
+        address = (read_pc_inc() + x) & 0xff;
+    zero page, Y (next byte is the address of the operand, add Y, wrap-around)
+        address = (read_pc_inc() + y) & 0xff;
+    absolute (next two bytes are the address of the operand)
+        uint8_t low = read_pc_inc();
+        uint8_t high = read_pc_inc();
+        address = low + high * 256;
+    absolute, X (next two bytes are the address of the operand, add X)
+        uint8_t low = read_pc_inc();
+        uint8_t high = read_pc_inc();
+        if(low + x >= 0x100) {
+            add_cpu_cycle();
+        }
+        address = low + high * 256 + x;
+    absolute, Y (next two bytes are the address of the operand, add Y)
+        uint8_t low = read_pc_inc();
+        uint8_t high = read_pc_inc();
+        if(low + y >= 0x100) {
+            add_cpu_cycle();
+        }
+        address = low + high * 256 + y;
+    relative (next byte is the signed operand, branches only)
+        address = pc;
+        pc++;
+    indirect (next two bytes are the address of the two-byte operand, JMP only)
+        uint8_t low = read_pc_inc();
+        uint8_t high = read_pc_inc();
+        address = low + high * 256;
+        low = bus.read(address);
+        if(6502) {
+            high = bus.read((address + 1) & 0xFF);
+        } else {
+            high = bus.read(address + 1);
+        }
+        address = low + high * 256;
+    indexed indirect (next byte is the address, add X, of the two-byte operand fetched without carry to high byte)
+        address = (read_pc_inc() + x) & 0xFF;
+        uint8_t low = bus.read(address)
+        uint8_t high = bus.read((address + 1) & 0xFF);
+        address = low + high * 256;
+    indirect indexed (next byte is the address of the two-byte operand fetched without carry to high byte, add Y)
+        address = read_pc_inc();
+        uint8_t low = bus.read(address)
+        uint8_t high = bus.read((address + 1) & 0xFF);
+        if(low + y >= 0x100) {
+            add_cpu_cycle();
+        }
+        address = low + high * 256 + y;
+
+ALU ops - from mem or reg or const, with ALU op with mem or reg or const, to mem or reg or discard, with flag update
+    uint8_t t = mem_or_reg_or_const [op mem_or_reg_or_const]
+    update_flags(t, flags)
+    [mem_or_reg_or_const = t]
+    (kind, op0, op1, op, result)
+    'LDA' : (alu, mem, none, none, a),
+    'STA' : (alu, a, none, none, mem),
+    'LDX' : (alu, mem, none, none, x),
+    'STX' : (alu, x, none, none, mem),
+    'LDY' : (alu, mem, none, none, y),
+    'STY' : (alu, y, none, none, mem),
+    'TXA' : (alu, x, none, none, a),
+    'TAX' : (alu, a, none, none, x),
+    'TYA' : (alu, y, none, none, a),
+    'TAY' : (alu, a, none, none, y),
+    'TXS' : (alu, x, none, none, sp),
+    'TSX' : (alu, sp, none, none, x),
+    'CLV' : (alu, p, ~V, and, p),
+    'SEC' : (alu, p, C, or, p),
+    'CLC' : (alu, p, ~C, and, p),
+    'SED' : (alu, p, D, or, p),
+    'CLD' : (alu, p, ~D, and, p),
+    'SEI' : (alu, p, I, or, p),
+    'CLI' : (alu, p, ~I, and, p),
+# XXX shifts can be on A or on memory, so express it as one using "oper":
+    'ASL' : (alu, oper, none, asl, oper),
+    'ROR' : (alu, oper, none, ror, oper),
+    'ROL' : (alu, oper, none, rol, oper),
+    'LSR' : (alu, oper, none, lsr, oper),
+    'CMP' : (alu, a, mem, sbc, none),
+    'CPX' : (alu, x, mem, sbc, none),
+    'CPY' : (alu, y, mem, sbc, none),
+    'DEC' : (alu, mem, 1, sub, mem),
+    'INC' : (alu, mem, 1, add, mem),
+    'DEX' : (alu, x, 1, sub, x),
+    'INX' : (alu, x, 1, add, x),
+    'DEY' : (alu, y, 1, sub, y),
+    'INY' : (alu, y, 1, add, y),
+    'ADC' : (alu, a, mem, adc, a),
+    'SBC' : (alu, a, mem, sbc, a),
+    'EOR' : (alu, a, mem, eor, a),
+    'ORA' : (alu, a, mem, or, a),
+    'AND' : (alu, a, mem, and, a),
+    'BIT' : (alu, a, mem, and, none), # this is a complicated instruction in terms of flags
+    'NOP' : (alu, none, none, none, none),
+
+branches
+    'BVC' : (branch, !isset(V)),
+    'BVS' : (branch, isset(V)),
+    'BCC' : (branch, !isset(C)),
+    'BCS' : (branch, isset(C)),
+    'BPL' : (branch, !isset(N)),
+    'BMI' : (branch, isset(N)),
+    'BEQ' : (branch, !isset(Z)),
+    'BNE' : (branch, isset(Z)),
+
+stack operations
+    'PHP' : (stack, push, p),
+    'PHA' : (stack, push, a),
+    'PLP' : (stack, pop, p),
+    'PLA' : (stack, pop, a),
+
+by hand?
+    'RTI' : (rti), # this is a PLP and then RTS
+    'BRK' : (brk), # this is similar to PHA and then JSR but hard to decompose
+    'JSR' : (jsr),
+    'RTS' : (rts),
+    'JMP' : (jmp),
+
+Can clock cycles be calculated from operation?
+    All instructions take at least two cycles - one to read the instruction and another to retire the instruction
+        retiring the instruction is in parallel with writes
+    All reads and writes add a cycle per byte read or written
+    carry operations add a cycle - address plus index (but not all additions have carry e.g. increment for high byte for some addressing modes)
+    branches taken add a cycle
