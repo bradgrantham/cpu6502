@@ -219,6 +219,18 @@ struct CPU6502
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
     }
 
+    void branch(bool condition) 
+    {
+        int32_t rel = (read_pc_inc() + 128) % 256 - 128;
+        if(condition) {
+            clk.add_cpu_cycles(1);
+            if((pc + rel) / 256 != pc / 256) {
+                clk.add_cpu_cycles(1);
+            }
+            pc += rel;
+        }
+    }
+
     void cycle()
     {
         if(exception == RESET) {
@@ -247,6 +259,15 @@ struct CPU6502
                 uint8_t high = bus.read(0xFFFF);
                 pc = low + high * 256;
                 exception = NONE;
+                break;
+            }
+
+            case 0x20: { // JSR
+                stack_push((pc + 1) >> 8);
+                stack_push((pc + 1) & 0xFF);
+                uint8_t low = read_pc_inc();
+                uint8_t high = read_pc_inc();
+                pc = low + high * 256;
                 break;
             }
 
@@ -402,98 +423,42 @@ struct CPU6502
             }
 
             case 0x10: { // BPL
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(!isset(N)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(!isset(N));
                 break;
             }
 
             case 0x50: { // BVC
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(!isset(V)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(!isset(V));
                 break;
             }
 
             case 0x70: { // BVS
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(isset(V)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(isset(V));
                 break;
             }
 
             case 0x30: { // BMI
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(isset(N)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(isset(N));
                 break;
             }
 
             case 0x90: { // BCC
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(!isset(C)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(!isset(C));
                 break;
             }
 
             case 0xB0: { // BCS
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(isset(C)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(isset(C));
                 break;
             }
 
             case 0xD0: { // BNE
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(!isset(Z)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(!isset(Z));
                 break;
             }
 
             case 0xF0: { // BEQ
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if(isset(Z)) {
-                    clk.add_cpu_cycles(1);
-                    if((pc + rel) / 256 != pc / 256) {
-                        clk.add_cpu_cycles(1);
-                    }
-                    pc += rel;
-                }
+                branch(isset(Z));
                 break;
             }
 
@@ -1645,16 +1610,6 @@ struct CPU6502
                 break;
             }
 
-            case 0x20: { // JSR
-                stack_push((pc + 1) >> 8);
-                stack_push((pc + 1) & 0xFF);
-                uint8_t low = read_pc_inc();
-                uint8_t high = read_pc_inc();
-                uint16_t addr = low + high * 256;
-                pc = addr;
-                break;
-            }
-
             case 0x75: { // ADC zpg, X
                 uint8_t zpg = read_pc_inc();
                 uint16_t addr = (zpg + x)& 0xFF;
@@ -1718,11 +1673,7 @@ struct CPU6502
             }
 
             case 0x80: { // BRA imm, 65C02
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
-                if((pc + rel) / 256 != pc / 256) {
-                    clk.add_cpu_cycles(1);
-                }
-                pc += rel;
+                branch(true);
                 break;
             }
 
@@ -1854,8 +1805,7 @@ struct CPU6502
             }
 
             case 0x02: case 0x22: case 0x42: case 0x62: case 0x82: case 0xC2: case 0xE2: { // two-byte NOP, 2 cycles
-                uint8_t ignored = read_pc_inc();
-                (void)ignored;
+                [[maybe_unused]] uint8_t ignored = read_pc_inc();
                 break;
             }
 
@@ -1870,30 +1820,24 @@ struct CPU6502
             }
 
             case 0x44: { // two-byte NOP, 3 cycles
-                uint8_t ignored = read_pc_inc();
-                (void)ignored;
+                [[maybe_unused]] uint8_t ignored = read_pc_inc();
                 break;
             }
 
             case 0x54: case 0xD4: case 0xF4: { // two-byte NOP, 4 cycles
-                uint8_t ignored = read_pc_inc();
-                (void)ignored;
+                [[maybe_unused]] uint8_t ignored = read_pc_inc();
                 break;
             }
 
             case 0x5C: { // three-byte NOP, 8 cycles
-                uint8_t ignored1 = read_pc_inc();
-                (void)ignored1;
-                uint8_t ignored2 = read_pc_inc();
-                (void)ignored2;
+                [[maybe_unused]] uint8_t ignored1 = read_pc_inc();
+                [[maybe_unused]] uint8_t ignored2 = read_pc_inc();
                 break;
             }
 
             case 0xDC: case 0xFC: { // three-byte NOP, 4 cycles
-                uint8_t ignored1 = read_pc_inc();
-                (void)ignored1;
-                uint8_t ignored2 = read_pc_inc();
-                (void)ignored2;
+                [[maybe_unused]] uint8_t ignored1 = read_pc_inc();
+                [[maybe_unused]] uint8_t ignored2 = read_pc_inc();
                 break;
             }
 
@@ -1933,10 +1877,11 @@ struct CPU6502
 
 #endif /* EMULATE_65C02 */
 
-            default:
+            default: {
                 printf("unhandled instruction %02X at %04X\n", inst, pc - 1);
                 fflush(stdout);
                 exit(1);
+            }
         }
         assert(cycles[inst] > 0);
         // Hack for putting writes near the end of the instruction to hopefully
