@@ -4,6 +4,7 @@
 #include <map>
 #include <algorithm>
 #include <cstdio>
+#include <cinttypes>
 #include "dis6502.h"
 
 #ifndef USE_FAKE_6502
@@ -16,7 +17,7 @@
 
 struct dummyclock
 {
-    int cycles = 0;
+    uint64_t cycles = 0;
     void add_cpu_cycles(int N) {
         cycles += N;
     }
@@ -121,6 +122,7 @@ extern uint8_t a;
 extern uint8_t x;
 extern uint8_t y;
 extern uint8_t status;
+extern uint32_t clockticks6502;
 
 };
 
@@ -145,7 +147,10 @@ struct CPU6502
 
     void cycle()
     {
+        uint32_t previous_clocks = clockticks6502;
         step6502();
+        uint32_t current_clocks = clockticks6502;
+        clk.add_cpu_cycles(current_clocks - previous_clocks);
     }
 
     void set_pc(uint16_t addr)
@@ -262,6 +267,7 @@ int main(int argc, const char **argv)
 
         [[maybe_unused]] static uint64_t count = 0;
         // if((count++) % 1000 == 0) {
+            printf("%08" PRIu64 ", ", clock.cycles);
             print_cpu_state(cpu);
             printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
         // }
@@ -280,6 +286,7 @@ int main(int argc, const char **argv)
         cpu.cycle();
     } while(get_cpu_state_vector(cpu)[CPU_STATE_VECTOR_PC] != oldpc);
 
+    printf("%08" PRIu64 ", ", clock.cycles);
     print_cpu_state(cpu);
     printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
 
