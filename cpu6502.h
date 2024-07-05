@@ -288,13 +288,13 @@ struct CPU6502
 
     uint16_t zeropage_indexed_X()
     {
-        uint8_t address = (read_pc_inc() + x) % 0xFF;
+        uint8_t address = (read_pc_inc() + x) & 0xFF;
         return address;
     }
 
     uint16_t zeropage_indexed_Y()
     {
-        uint8_t address = (read_pc_inc() + y) % 0xFF;
+        uint8_t address = (read_pc_inc() + y) & 0xFF;
         return address;
     }
 
@@ -593,9 +593,10 @@ struct CPU6502
             }
 
             case 0x20: { // JSR abs
-                stack_push((pc + 1) >> 8);
-                stack_push((pc + 1) & 0xFF);
+                uint16_t to_push = pc + 1;
                 uint16_t addr = absolute();
+                stack_push(to_push >> 8);
+                stack_push(to_push & 0xFF);
                 clk.add_cpu_cycles(1);
                 pc = addr;
                 break;
@@ -1624,7 +1625,7 @@ struct CPU6502
                 int whichbit = (inst >> 4) & 0x7;
                 uint8_t zpg = zeropage();
                 uint8_t m = read(zpg);
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
+                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
                 if(!(m & (1 << whichbit))) {
                     // if((pc + rel) / 256 != pc / 256)
                         // clk.add_cpu_cycles(1); // XXX ???
@@ -1638,7 +1639,7 @@ struct CPU6502
                 int whichbit = (inst >> 4) & 0x7;
                 uint8_t zpg = zeropage();
                 uint8_t m = read(zpg);
-                int32_t rel = (read_pc_inc() + 128) % 256 - 128;
+                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
                 if(m & (1 << whichbit)) {
                     // if((pc + rel) / 256 != pc / 256)
                         // clk.add_cpu_cycles(1); // XXX ???
