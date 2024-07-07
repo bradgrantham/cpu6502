@@ -427,7 +427,6 @@ def instruction(i, mnemonic, addressing, in_65C02):
     if addressing not in addressing_mode_code: # ["A", "#", "impl", "zpg", "abs", "rel", "X,ind", "ind,Y", "zpg,X", "zpg,Y", "abs,X", "abs,Y", "ind", "(zpg)", "(abs,X)"]:
         print("unknown addressing mode \"%s\"" % addressing)
         sys.exit(1)
-    print("%02X : %s %s" % (i, mnemonic, addressing))
     all_instructions[i] = (in_65C02, mnemonic, addressing)
 
 base = 0
@@ -453,23 +452,35 @@ for (byte, params) in added_by_65C02.items():
     (mnemonic, addressing) = params
     instruction(byte, mnemonic, addressing, True)
 
-instruction_template = r'''\
-            case 0x%02X: {
-                clk.add_cpu_cycles(1);
-                {instruction_code}
-                break;
-            }
-'''
+masswerk_addressing_to_brad = {
+    "A" : "A",
+    "#" : "imm",
+    "impl" : "impl", 
+    "zpg" : "zpg",
+    "abs" : "abs",
+    "rel" : "rel", 
+    "X,ind" : "(ind, X)",
+    "ind,Y" : "(ind), Y",
+    "zpg,X" : "zpg, X",
+    "zpg,Y" : "zpg, Y",
+    "abs,X" : "abs, X",
+    "abs,Y" : "abs, Y",
+    "ind" : "ind", 
+    "(zpg)" : "(zpg)",
+    "(abs,X)": "(abs, X)",
+}
 
 for byte in range(256):
     if byte in all_instructions:
         (in_65C02, mnemonic, addressing) = all_instructions[byte]
         if in_65C02:
-            print("#if EMULATE_65C02")
-        # print("%02X: %s %s (65C02 only)" % (byte, mnemonic, addressing))
-        op = operations[mnemonic]
-        if op["kind"] == alu:
-            print("""\
-""")
-        if in_65C02:
-            print("#endif /* EMULATE_65C02 */")
+            print("0x%02X: %s %s, 65C02" % (byte, mnemonic, masswerk_addressing_to_brad[addressing]))
+        else:
+            print("0x%02X: %s %s" % (byte, mnemonic, masswerk_addressing_to_brad[addressing]))
+        if False:
+            if in_65C02:
+                print("#if EMULATE_65C02")
+            op = operations[mnemonic]
+            # stuff
+            if in_65C02:
+                print("#endif /* EMULATE_65C02 */")
