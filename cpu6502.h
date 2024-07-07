@@ -30,7 +30,7 @@
 #include <vector>
 
 #ifndef EMULATE_65C02
-#define EMULATE_65C02 1
+#define EMULATE_65C02 0
 #endif /* EMULATE_65C02 */
 
 template<class CLK, class BUS>
@@ -62,6 +62,19 @@ struct CPU6502
     void set_pc(uint16_t addr)
     {
         pc = addr;
+        exception = NONE;
+    }
+
+    uint8_t read(uint16_t address)
+    {
+        clk.add_cpu_cycles(1);
+        return bus.read(address);
+    }
+
+    void write(uint16_t address, uint8_t value)
+    {
+        clk.add_cpu_cycles(1);
+        bus.write(address, value);
     }
 
     void stack_push(uint8_t d)
@@ -71,14 +84,12 @@ struct CPU6502
 
     uint8_t stack_pull()
     {
-        clk.add_cpu_cycles(1);
-        return bus.read(0x100 + ++s);
+        return read(0x100 + ++s);
     }
 
     uint8_t read_pc_inc()
     {
-        clk.add_cpu_cycles(1);
-        return bus.read(pc++);
+        return read(pc++);
     }
 
     void flag_change(uint8_t flag, bool v)
@@ -167,8 +178,8 @@ struct CPU6502
     void reset()
     {
         s = 0xFD;
-        uint8_t low = bus.read(0xFFFC);
-        uint8_t high = bus.read(0xFFFD);
+        uint8_t low = read(0xFFFC);
+        uint8_t high = read(0xFFFD);
         pc = low + high * 256;
         exception = NONE;
     }
@@ -178,8 +189,8 @@ struct CPU6502
         stack_push((pc - 1) >> 8);
         stack_push((pc - 1) & 0xFF);
         stack_push((p | B2) & ~B);
-        uint8_t low = bus.read(0xFFFE);
-        uint8_t high = bus.read(0xFFFF);
+        uint8_t low = read(0xFFFE);
+        uint8_t high = read(0xFFFF);
         pc = low + high * 256;
         exception = NONE;
     }
@@ -189,22 +200,10 @@ struct CPU6502
         stack_push((pc - 1) >> 8);
         stack_push((pc - 1) & 0xFF);
         stack_push((p | B2) & ~B);
-        uint8_t low = bus.read(0xFFFA);
-        uint8_t high = bus.read(0xFFFB);
+        uint8_t low = read(0xFFFA);
+        uint8_t high = read(0xFFFB);
         pc = low + high * 256;
         exception = NONE;
-    }
-
-    uint8_t read(uint16_t address)
-    {
-        clk.add_cpu_cycles(1);
-        return bus.read(address);
-    }
-
-    void write(uint16_t address, uint8_t value)
-    {
-        bus.write(address, value);
-        clk.add_cpu_cycles(1);
     }
 
     void adc_bcd(uint8_t m, uint8_t carry)
@@ -215,6 +214,9 @@ struct CPU6502
         flag_change(V, adc_overflow_d(bcd_a, bcd_m, carry));
         set_flags(N | Z, bcd_a = bcd_a + bcd_m + carry);
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
+#if EMULATE_65C02
+        clk.add_cpu_cycles(1); // 1 more cycle for decimal mode on 65C02
+#endif /* EMULATE_65C02 */
     }
 
     void sbc_bcd(uint8_t m, uint8_t borrow)
@@ -229,15 +231,18 @@ struct CPU6502
             set_flags(N | Z, bcd_a = (bcd_a + 100 - (bcd_m + borrow)));
         }
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
+#if EMULATE_65C02
+        clk.add_cpu_cycles(1); // 1 more cycle for decimal mode on 65C02
+#endif /* EMULATE_65C02 */
     }
 
     void branch(bool condition) 
     {
         int32_t rel = (read_pc_inc() + 128) % 256 - 128;
         if(condition) {
-            clk.add_cpu_cycles(1);
+            clk.add_cpu_cycles(1); // 1 more cycle if branch taken
             if((pc + rel) / 256 != pc / 256) {
-                clk.add_cpu_cycles(1);
+                clk.add_cpu_cycles(1); // 1 more cycle if address crosses pages
             }
             pc += rel;
         }
@@ -289,12 +294,14 @@ struct CPU6502
     uint16_t zeropage_indexed_X()
     {
         uint8_t address = (read_pc_inc() + x) & 0xFF;
+        clk.add_cpu_cycles(1);
         return address;
     }
 
     uint16_t zeropage_indexed_Y()
     {
         uint8_t address = (read_pc_inc() + y) & 0xFF;
+        clk.add_cpu_cycles(1);
         return address;
     }
 
@@ -314,6 +321,7 @@ struct CPU6502
     uint16_t indexed_indirect()
     {
         uint8_t zpg = (read_pc_inc() + x) & 0xFF;
+        clk.add_cpu_cycles(1);
         uint8_t low = read(zpg);
         uint8_t high = read((zpg + 1) & 0xFF);
         uint16_t address = low + high * 256;
@@ -501,7 +509,6 @@ struct CPU6502
                     flag_change(V, adc_overflow(a, m, carry));
                     set_flags(N | Z, a = a + m + carry);
                 }
-                clk.add_cpu_cycles(1);
                 break;
             }
 
@@ -516,7 +523,6 @@ struct CPU6502
                     flag_change(V, adc_overflow(a, m, carry));
                     set_flags(N | Z, a = a + m + carry);
                 }
-                clk.add_cpu_cycles(1);
                 break;
             }
 
@@ -612,7 +618,6 @@ struct CPU6502
 
             case 0xD6: { // DEC zpg, X
                 uint8_t zpg = zeropage_indexed_X();
-                clk.add_cpu_cycles(1);
                 set_flags(N | Z, m = read(zpg) - 1);
                 clk.add_cpu_cycles(1);
                 write(zpg, m);
@@ -645,7 +650,6 @@ struct CPU6502
 
             case 0xF6: { // INC zpg, X
                 uint8_t zpg = zeropage_indexed_X();
-                clk.add_cpu_cycles(1);
                 set_flags(N | Z, m = read(zpg) + 1);
                 clk.add_cpu_cycles(1);
                 write(zpg, m);
@@ -662,7 +666,6 @@ struct CPU6502
 
             case 0xFE: { // INC abs, X
                 uint16_t addr = absolute_indexed_X(true);
-                clk.add_cpu_cycles(1);
                 set_flags(N | Z, m = read(addr) + 1);
                 clk.add_cpu_cycles(1);
                 write(addr, m);
@@ -718,7 +721,6 @@ struct CPU6502
 
             case 0xA1: { // LDA (ind, X)
                 uint16_t addr = indexed_indirect();
-                clk.add_cpu_cycles(1);
                 set_flags(N | Z, a = read(addr));
                 break;
             }
@@ -726,13 +728,35 @@ struct CPU6502
             case 0xB5: { // LDA zpg, X
                 uint8_t addr = zeropage_indexed_X();
                 set_flags(N | Z, a = read(addr));
-                clk.add_cpu_cycles(1);
                 break;
             }
 
             case 0xB1: { // LDA (ind), Y
                 uint16_t addr = indirect_indexed(false);
                 set_flags(N | Z, a = read(addr));
+                break;
+            }
+
+            case 0x4A: { // LSR A
+                flag_change(C, a & 0x01);
+                clk.add_cpu_cycles(1);
+                set_flags(N | Z, a = a >> 1);
+                break;
+            }
+
+            case 0x2A: { // ROL A
+                bool c = isset(C);
+                flag_change(C, a & 0x80);
+                clk.add_cpu_cycles(1);
+                set_flags(N | Z, a = (c ? 0x01 : 0x00) | (a << 1));
+                break;
+            }
+
+            case 0x6A: { // ROR A
+                bool c = isset(C);
+                flag_change(C, a & 0x01);
+                clk.add_cpu_cycles(1);
+                set_flags(N | Z, a = (c ? 0x80 : 0x00) | (a >> 1));
                 break;
             }
 
@@ -940,6 +964,7 @@ struct CPU6502
             case 0x0E: { // ASL abs
                 uint16_t addr = absolute();
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = m << 1);
                 write(addr, m);
@@ -948,11 +973,12 @@ struct CPU6502
 
             case 0x1E: { // ASL abs, X
 #if EMULATE_65C02
-                uint16_t addr = absolute_indexed_X(true);
-#else /* !EMULATE_65C02 */
                 uint16_t addr = absolute_indexed_X(false);
+#else /* !EMULATE_65C02 */
+                uint16_t addr = absolute_indexed_X(true);
 #endif /* EMULATE_65C02 */
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = m << 1);
                 write(addr, m);
@@ -962,6 +988,7 @@ struct CPU6502
             case 0x06: { // ASL zpg
                 uint8_t zpg = zeropage();
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = m << 1);
                 write(zpg, m);
@@ -971,19 +998,21 @@ struct CPU6502
             case 0x16: { // ASL zpg, X
                 uint8_t zpg = zeropage_indexed_X();
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = m << 1);
-                bus.write(zpg, m);
+                write(zpg, m);
                 break;
             }
 
             case 0x5E: { // LSR abs, X
 #if EMULATE_65C02
-                uint16_t addr = absolute_indexed_X(true);
-#else /* !EMULATE_65C02 */
                 uint16_t addr = absolute_indexed_X(false);
+#else /* !EMULATE_65C02 */
+                uint16_t addr = absolute_indexed_X(true);
 #endif /* EMULATE_65C02 */
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = m >> 1);
                 write(addr, m);
@@ -993,6 +1022,7 @@ struct CPU6502
             case 0x46: { // LSR zpg
                 uint8_t zpg = zeropage();
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = m >> 1);
                 write(zpg, m);
@@ -1002,6 +1032,7 @@ struct CPU6502
             case 0x56: { // LSR zpg, X
                 uint8_t zpg = zeropage_indexed_X();
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = m >> 1);
                 write(zpg, m);
@@ -1011,24 +1042,22 @@ struct CPU6502
             case 0x4E: { // LSR abs
                 uint16_t addr = absolute();
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = m >> 1);
                 write(addr, m);
                 break;
             }
 
-            case 0x4A: { // LSR A
-                flag_change(C, a & 0x01);
-                set_flags(N | Z, a = a >> 1);
-                break;
-            }
-
             case 0x68: { // PLA
+                clk.add_cpu_cycles(1);
+                clk.add_cpu_cycles(1); // Pipelined pre-increment
                 set_flags(N | Z, a = stack_pull());
                 break;
             }
 
             case 0x48: { // PHA
+                clk.add_cpu_cycles(1);
                 stack_push(a);
                 break;
             }
@@ -1147,11 +1176,12 @@ struct CPU6502
 
             case 0x7E: { // ROR abs, X
 #if EMULATE_65C02
-                uint16_t addr = absolute_indexed_X(true);
-#else /* !EMULATE_65C02 */
                 uint16_t addr = absolute_indexed_X(false);
+#else /* !EMULATE_65C02 */
+                uint16_t addr = absolute_indexed_X(true);
 #endif /* EMULATE_65C02 */
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 bool c = isset(C);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = (c ? 0x80 : 0x00) | (m >> 1));
@@ -1162,6 +1192,7 @@ struct CPU6502
             case 0x36: { // ROL zpg, X
                 uint8_t zpg = zeropage_indexed_X();
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 bool c = isset(C);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = (c ? 0x01 : 0x00) | (m << 1));
@@ -1172,11 +1203,12 @@ struct CPU6502
 
             case 0x3E: { // ROL abs, X
 #if EMULATE_65C02
-                uint16_t addr = absolute_indexed_X(true);
-#else /* !EMULATE_65C02 */
                 uint16_t addr = absolute_indexed_X(false);
+#else /* !EMULATE_65C02 */
+                uint16_t addr = absolute_indexed_X(true);
 #endif /* EMULATE_65C02 */
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 bool c = isset(C);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = (c ? 0x01 : 0x00) | (m << 1));
@@ -1184,23 +1216,10 @@ struct CPU6502
                 break;
             }
 
-            case 0x2A: { // ROL A
-                bool c = isset(C);
-                flag_change(C, a & 0x80);
-                set_flags(N | Z, a = (c ? 0x01 : 0x00) | (a << 1));
-                break;
-            }
-
-            case 0x6A: { // ROR A
-                bool c = isset(C);
-                flag_change(C, a & 0x01);
-                set_flags(N | Z, a = (c ? 0x80 : 0x00) | (a >> 1));
-                break;
-            }
-
             case 0x6E: { // ROR abs
                 uint16_t addr = absolute();
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 bool c = isset(C);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = (c ? 0x80 : 0x00) | (m >> 1));
@@ -1211,6 +1230,7 @@ struct CPU6502
             case 0x66: { // ROR zpg
                 uint8_t zpg = zeropage();
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 bool c = isset(C);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = (c ? 0x80 : 0x00) | (m >> 1));
@@ -1221,6 +1241,7 @@ struct CPU6502
             case 0x76: { // ROR zpg, X
                 uint8_t zpg = zeropage_indexed_X();
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 bool c = isset(C);
                 flag_change(C, m & 0x01);
                 set_flags(N | Z, m = (c ? 0x80 : 0x00) | (m >> 1));
@@ -1231,6 +1252,7 @@ struct CPU6502
             case 0x2E: { // ROL abs
                 uint16_t addr = absolute();
                 m = read(addr);
+                clk.add_cpu_cycles(1);
                 bool c = isset(C);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = (c ? 0x01 : 0x00) | (m << 1));
@@ -1243,6 +1265,7 @@ struct CPU6502
                 uint8_t zpg = zeropage();
                 bool c = isset(C);
                 m = read(zpg);
+                clk.add_cpu_cycles(1);
                 flag_change(C, m & 0x80);
                 set_flags(N | Z, m = (c ? 0x01 : 0x00) | (m << 1));
                 write(zpg, m);
@@ -1268,7 +1291,7 @@ struct CPU6502
             }
 
             case 0x99: { // STA abs, Y
-                uint16_t addr = absolute_indexed_Y(false);
+                uint16_t addr = absolute_indexed_Y(true);
                 write(addr, a);
                 break;
             }
@@ -1292,11 +1315,14 @@ struct CPU6502
             }
 
             case 0x08: { // PHP
+                clk.add_cpu_cycles(1);
                 stack_push(p | B2 | B);
                 break;
             }
 
             case 0x28: { // PLP
+                clk.add_cpu_cycles(1);
+                clk.add_cpu_cycles(1); // Pipelined pre-increment
                 p = stack_pull() | B2 | B;
                 break;
             }
@@ -1546,7 +1572,9 @@ struct CPU6502
             }
 
             case 0x40: { // RTI
+                clk.add_cpu_cycles(1);
                 p = stack_pull() | B2 | B;
+                clk.add_cpu_cycles(1); // Pipelined pre-increment
                 uint8_t pcl = stack_pull();
                 uint8_t pch = stack_pull();
                 pc = pcl + pch * 256;
@@ -1554,21 +1582,24 @@ struct CPU6502
             }
 
             case 0x60: { // RTS
+                clk.add_cpu_cycles(1);
+                clk.add_cpu_cycles(1); // Pipelined pre-increment
                 uint8_t pcl = stack_pull();
                 uint8_t pch = stack_pull();
+                clk.add_cpu_cycles(1);
                 pc = pcl + pch * 256 + 1;
                 break;
             }
 
            case 0x94: { // STY zpg, X
                 uint8_t zpg = zeropage_indexed_X();
-                bus.write(zpg, y);
+                write(zpg, y);
                 break;
             }
 
             case 0x95: { // STA zpg, X
                 uint8_t zpg = zeropage_indexed_X();
-                bus.write(zpg, a);
+                write(zpg, a);
                 break;
             }
 
@@ -1654,11 +1685,13 @@ struct CPU6502
             }
 
             case 0x7A: { // PLY, 65C02
+                clk.add_cpu_cycles(1); // Pipelined pre-increment
                 set_flags(N | Z, y = stack_pull());
                 break;
             }
 
             case 0xFA: { // PLX, 65C02
+                clk.add_cpu_cycles(1); // Pipelined pre-increment
                 set_flags(N | Z, x = stack_pull());
                 break;
             }
