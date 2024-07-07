@@ -7,13 +7,7 @@
 #include <cinttypes>
 #include "dis6502.h"
 
-#ifndef USE_FAKE_6502
-#error must set USE_FAKE_6502
-#endif
-
-#if !USE_FAKE_6502
 #include "cpu6502.h"
-#endif
 
 struct dummyclock
 {
@@ -42,12 +36,21 @@ enum {
     CPU_STATE_VECTOR_STATUS_C = 0x01,
 };
 
+template<class CPU>
+cpu_state_vector get_cpu_state_vector(const CPU& cpu)
+{
+    return {cpu.a, cpu.x, cpu.y, cpu.p, cpu.s, cpu.pc};
+}
+
+
 #if 0
 
 struct bus
 {
     typedef std::map<uint16_t, uint8_t> memory_type;
     memory_type memory;
+
+    std::vector<std::pair<uint16_t, uint8_t>> write_history;
 
     bus() { }
 
@@ -70,6 +73,7 @@ struct bus
         } else {
             memory.insert_or_assign(addr, data);
         }
+        write_history.push_back(std::make_pair(addr, data));
     }
 };
 
@@ -79,6 +83,9 @@ struct bus
 {
     typedef std::array<uint8_t, 64 * 1024> memory_type;
     memory_type memory;
+
+    std::vector<std::pair<uint16_t, uint8_t>> write_history;
+
     bus()
     {
         std::fill(memory.begin(), memory.end(), 0xA5);
@@ -92,13 +99,12 @@ struct bus
     {
         printf("write 0x%02X to 0x%04X\n", data, addr);
         memory[addr] = data;
+        write_history.push_back(std::make_pair(addr, data));
     }
 };
 
 #endif
 
-
-#if USE_FAKE_6502
 
 #include "fake6502.h"
 
@@ -127,12 +133,12 @@ extern uint32_t clockticks6502;
 };
 
 template<class CLK, class BUS>
-struct CPU6502
+struct CPUFake6502
 {
     CLK &clk;
     BUS &bus;
 
-    CPU6502(CLK& clk_, BUS& bus_) :
+    CPUFake6502(CLK& clk_, BUS& bus_) :
         clk(clk_),
         bus(bus_)
     {
@@ -160,25 +166,13 @@ struct CPU6502
 };
 
 template<class CLK, class BUS>
-cpu_state_vector get_cpu_state_vector(const CPU6502<CLK, BUS>& cpu)
+cpu_state_vector get_cpu_state_vector(const CPUFake6502<CLK, BUS>& cpu)
 {
     return {a, x, y, status, sp, pc};
 }
 
-#else
-
-template<class CLK, class BUS>
-cpu_state_vector get_cpu_state_vector(const CPU6502<CLK, BUS>& cpu)
+void print_cpu_state(const cpu_state_vector& state)
 {
-    return {cpu.a, cpu.x, cpu.y, cpu.p, cpu.s, cpu.pc};
-}
-
-#endif
-
-template<class CLK, class BUS>
-void print_cpu_state(const CPU6502<CLK, BUS>& cpu)
-{
-    cpu_state_vector state = get_cpu_state_vector(cpu);
     printf("6502: A:%02X X:%02X Y:%02X P:", state[CPU_STATE_VECTOR_A], state[CPU_STATE_VECTOR_X], state[CPU_STATE_VECTOR_Y]);
     printf("%s", (state[CPU_STATE_VECTOR_STATUS] & CPU_STATE_VECTOR_STATUS_N) ? "N" : "n");
     printf("%s", (state[CPU_STATE_VECTOR_STATUS] & CPU_STATE_VECTOR_STATUS_V) ? "V" : "v");
@@ -252,23 +246,28 @@ int main(int argc, const char **argv)
 
     }
 
-    dummyclock clock;
+    dummyclock clock, clock2;
+
+    bus machine2 = machine;
 
     CPU6502<dummyclock, bus> cpu(clock, machine);
-
-    cpu.reset();
+    CPUFake6502<dummyclock, bus> fakecpu(clock2, machine2);
 
     cpu.set_pc(start);
+    fakecpu.set_pc(start);
+
+    std::set<std::pair<cpu_state_vector, bus::memory_type>> seen_states;
 
     uint16_t oldpc;
-    std::set<std::pair<cpu_state_vector, bus::memory_type>> seen_states;
+    uint64_t oldclock = 0;
+    uint64_t oldclock2 = 0;
     do {
         oldpc = get_cpu_state_vector(cpu)[CPU_STATE_VECTOR_PC];
 
         [[maybe_unused]] static uint64_t count = 0;
         // if((count++) % 1000 == 0) {
-            printf("%08" PRIu64 ", ", clock.cycles);
-            print_cpu_state(cpu);
+            printf("%08" PRIu64 ", ", clock.cycles - oldclock);
+            print_cpu_state(get_cpu_state_vector(cpu));
             printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
         // }
 
@@ -276,18 +275,61 @@ int main(int argc, const char **argv)
             auto current_state = std::make_pair(get_cpu_state_vector(cpu), machine.memory);
             if(seen_states.count(current_state) > 0) {
                 printf("saw this state before, bail\n");
-                print_cpu_state(cpu);
+                print_cpu_state(get_cpu_state_vector(cpu));
                 printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
                 exit(0);
             }
             seen_states.insert(current_state);
         }
 
+        machine.write_history.clear();
+        machine2.write_history.clear();
+        oldclock = clock.cycles;
+        oldclock2 = clock2.cycles;
         cpu.cycle();
+        fakecpu.cycle();
+
+        uint64_t cycles = clock.cycles - oldclock;
+        uint64_t cycles2 = clock2.cycles - oldclock2;
+
+        auto cpu_state = get_cpu_state_vector(cpu);
+        auto fakecpu_state = get_cpu_state_vector(fakecpu);
+
+        if(cycles != cycles2) {
+            printf("CPU instruction timing differed\n");
+            printf("CPU:     %" PRIu64 " cycles\n", cycles);
+            printf("FAKECPU: %" PRIu64 " cycles\n", cycles2);
+            exit(1);
+        }
+
+        if(cpu_state != fakecpu_state) {
+            printf("CPU vectors differ\n");
+            printf("CPU:      ");
+            print_cpu_state(get_cpu_state_vector(cpu));
+            printf("FAKECPU:  ");
+            print_cpu_state(get_cpu_state_vector(fakecpu));
+            exit(1);
+        }
+
+        if(machine.write_history != machine2.write_history) {
+            printf("memory writes differed\n");
+            printf("CPU:");
+            for(auto& write: machine.write_history) {
+                printf(" (0x%04X, 0x%02X)", write.first, write.second);
+            }
+            printf("\n");
+            printf("FAKECPU:");
+            for(auto& write: machine2.write_history) {
+                printf(" (0x%04X, 0x%02X)", write.first, write.second);
+            }
+            printf("\n");
+            exit(1);
+        }
+
     } while(get_cpu_state_vector(cpu)[CPU_STATE_VECTOR_PC] != oldpc);
 
-    printf("%08" PRIu64 ", ", clock.cycles);
-    print_cpu_state(cpu);
+    printf("%08" PRIu64 ", ", clock.cycles - oldclock);
+    print_cpu_state(get_cpu_state_vector(cpu));
     printf("%s\n", read_bus_and_disassemble(machine, oldpc).c_str());
 
     exit(EXIT_SUCCESS);
