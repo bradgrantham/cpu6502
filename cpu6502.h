@@ -170,7 +170,7 @@ struct CPU6502
         x(0),
         y(0),
         s(0xFD),
-        p(I | B | B2),
+        p(I | B | B2 | Z), // XXX flooh m6502 starts up with Z set...?
         exception(RESET)
     {
     }
@@ -212,7 +212,8 @@ struct CPU6502
         uint8_t bcd_m = m / 16 * 10 + m % 16;
         flag_change(C, ((uint16_t)bcd_a + (uint16_t)bcd_m + carry) > 99);
         flag_change(V, adc_overflow_d(bcd_a, bcd_m, carry));
-        set_flags(N | Z, bcd_a = bcd_a + bcd_m + carry);
+        bcd_a = bcd_a + bcd_m + carry;
+        set_flags(N | Z, (bcd_a % 100));
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
 #if EMULATE_65C02
         clk.add_cpu_cycles(1); // 1 more cycle for decimal mode on 65C02
@@ -226,10 +227,11 @@ struct CPU6502
         flag_change(C, !(bcd_a < bcd_m + borrow));
         flag_change(V, sbc_overflow_d(bcd_a, bcd_m, borrow));
         if(bcd_m + borrow <= bcd_a) { 
-            set_flags(N | Z, bcd_a = (bcd_a - (bcd_m + borrow)) % 100);
+            bcd_a = (bcd_a - (bcd_m + borrow)) % 100;
         } else {
-            set_flags(N | Z, bcd_a = (bcd_a + 100 - (bcd_m + borrow)));
+            bcd_a = bcd_a + 100 - (bcd_m + borrow);
         }
+        set_flags(N | Z, (bcd_a % 100));
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
 #if EMULATE_65C02
         clk.add_cpu_cycles(1); // 1 more cycle for decimal mode on 65C02
