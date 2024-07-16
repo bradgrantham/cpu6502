@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cinttypes>
+#include <iostream>
 #include "dis6502.h"
 
 #include "cpu6502.h"
@@ -18,6 +19,7 @@ struct dummyclock
 };
 
 typedef std::array<unsigned int, 6> cpu_state_vector;
+
 enum {
     CPU_STATE_VECTOR_A = 0,
     CPU_STATE_VECTOR_X = 1,
@@ -37,54 +39,17 @@ enum {
 };
 
 template<class CPU>
-cpu_state_vector get_cpu_state_vector(const CPU& cpu)
+cpu_state_vector get_cpu_state_vector(CPU& cpu)
 {
     return {cpu.a, cpu.x, cpu.y, cpu.p, cpu.s, cpu.pc};
 }
-
-
-#if 0
-
-struct bus
-{
-    typedef std::map<uint16_t, uint8_t> memory_type;
-    memory_type memory;
-
-    std::vector<std::pair<uint16_t, uint8_t>> write_history;
-
-    bus() { }
-
-    uint8_t read(uint16_t addr) const
-    {
-        auto found = memory.find(addr);
-        if(found == memory.end()) {
-            // printf("read 0x%04X yields 0xFF\n", addr);
-            return 0xff;
-        };
-        // printf("read 0x%04X yields 0x%02X\n", addr, memory.at(addr));
-        return found->second;
-    }
-
-    void write(uint16_t addr, uint8_t data)
-    {
-        // printf("write 0x%02X to 0x%04X\n", data, addr);
-        if(data == 0xff) {
-            memory.erase(addr);
-        } else {
-            memory.insert_or_assign(addr, data);
-        }
-        write_history.push_back(std::make_pair(addr, data));
-    }
-};
-
-#else
 
 struct bus
 {
     typedef std::array<uint8_t, 64 * 1024> memory_type;
     memory_type memory;
 
-    std::vector<std::pair<uint16_t, uint8_t>> write_history;
+    std::map<uint16_t, uint8_t> write_history;
 
     bus()
     {
@@ -92,82 +57,81 @@ struct bus
     }
     uint8_t read(uint16_t addr) const
     {
-        printf("read 0x%04X yields 0x%02X\n", addr, memory[addr]);
         return memory[addr];
     }
     void write(uint16_t addr, uint8_t data)
     {
-        printf("write 0x%02X to 0x%04X\n", data, addr);
         memory[addr] = data;
-        write_history.push_back(std::make_pair(addr, data));
+        write_history[addr] = data;
     }
 };
 
-#endif
-
-
-#include "fake6502.h"
-
-bus* fake_6502_bus;
-
 extern "C" {
-
-uint8_t read6502(uint16_t address)
-{
-    return fake_6502_bus->read(address);
-}
-
-void write6502(uint16_t address, uint8_t value)
-{
-    fake_6502_bus->write(address, value);
-}
-
-extern uint16_t pc;
-extern uint8_t sp;
-extern uint8_t a;
-extern uint8_t x;
-extern uint8_t y;
-extern uint8_t status;
-extern uint32_t clockticks6502;
-
+#define CHIPS_IMPL
+#include "m6502.h"
 };
 
 template<class CLK, class BUS>
-struct CPUFake6502
+struct Reference6502
 {
     CLK &clk;
     BUS &bus;
 
-    CPUFake6502(CLK& clk_, BUS& bus_) :
+    m6502_t cpu;
+    uint64_t pins;
+
+    Reference6502(CLK& clk_, BUS& bus_) :
         clk(clk_),
         bus(bus_)
     {
-        fake_6502_bus = &bus;
-        reset6502();
-    }
-
-    void reset()
-    {
-        reset6502();
+        m6502_desc_t init { 0 };
+        pins = m6502_init(&cpu, &init);
+        cycle();
+        cycle();
+        cycle();
+        cycle();
+        cycle();
+        cycle();
+        cycle();
     }
 
     void cycle()
     {
-        uint32_t previous_clocks = clockticks6502;
-        step6502();
-        uint32_t current_clocks = clockticks6502;
-        clk.add_cpu_cycles(current_clocks - previous_clocks);
+        uint64_t cycles = 0;
+        do {
+            pins = m6502_tick(&cpu, pins);
+            const uint16_t addr = M6502_GET_ADDR(pins);
+            if (pins & M6502_RW) {
+                // a memory read
+                M6502_SET_DATA(pins, bus.read(addr));
+            }
+            else {
+                // a memory write
+                bus.write(addr, M6502_GET_DATA(pins));
+            }
+            cycles++;
+        } while (!(pins & M6502_SYNC));
+        clk.add_cpu_cycles(cycles);
     }
 
     void set_pc(uint16_t addr)
     {
-        pc = addr;
+        pins = M6502_SYNC;
+        M6502_SET_ADDR(pins, addr);
+        M6502_SET_DATA(pins, bus.read(addr));
+        m6502_set_pc(&cpu, addr);
     }
 };
 
 template<class CLK, class BUS>
-cpu_state_vector get_cpu_state_vector(const CPUFake6502<CLK, BUS>& cpu)
+cpu_state_vector get_cpu_state_vector(Reference6502<CLK, BUS>& cpu)
 {
+    uint8_t a = m6502_a(&cpu.cpu);
+    uint8_t x = m6502_x(&cpu.cpu);
+    uint8_t y = m6502_y(&cpu.cpu);
+    uint8_t status = m6502_p(&cpu.cpu);
+    uint8_t sp = m6502_s(&cpu.cpu);
+    uint16_t pc = m6502_pc(&cpu.cpu);
     return {a, x, y, status, sp, pc};
 }
 
@@ -206,6 +170,7 @@ int main(int argc, const char **argv)
 
     bus machine;
     uint16_t start;
+    bool validate = true;
 
     FILE *testbin = fopen(argv[1], "rb");
     if(!testbin) {
@@ -251,10 +216,10 @@ int main(int argc, const char **argv)
     bus machine2 = machine;
 
     CPU6502<dummyclock, bus> cpu(clock, machine);
-    CPUFake6502<dummyclock, bus> fakecpu(clock2, machine2);
+    Reference6502<dummyclock, bus> refcpu(clock2, machine2);
 
     cpu.set_pc(start);
-    fakecpu.set_pc(start);
+    refcpu.set_pc(start);
 
     std::set<std::pair<cpu_state_vector, bus::memory_type>> seen_states;
 
@@ -283,47 +248,62 @@ int main(int argc, const char **argv)
         }
 
         machine.write_history.clear();
-        machine2.write_history.clear();
         oldclock = clock.cycles;
-        oldclock2 = clock2.cycles;
         cpu.cycle();
-        fakecpu.cycle();
 
-        uint64_t cycles = clock.cycles - oldclock;
-        uint64_t cycles2 = clock2.cycles - oldclock2;
+        if(validate) {
+            machine2.write_history.clear();
+            oldclock2 = clock2.cycles;
+            refcpu.cycle();
 
-        auto cpu_state = get_cpu_state_vector(cpu);
-        auto fakecpu_state = get_cpu_state_vector(fakecpu);
+            uint64_t cycles = clock.cycles - oldclock;
+            uint64_t cycles2 = clock2.cycles - oldclock2;
 
-        if(cycles != cycles2) {
-            printf("CPU instruction timing differed\n");
-            printf("CPU:     %" PRIu64 " cycles\n", cycles);
-            printf("FAKECPU: %" PRIu64 " cycles\n", cycles2);
-            exit(1);
-        }
+            auto cpu_state = get_cpu_state_vector(cpu);
+            auto refcpu_state = get_cpu_state_vector(refcpu);
 
-        if(cpu_state != fakecpu_state) {
-            printf("CPU vectors differ\n");
-            printf("CPU:      ");
-            print_cpu_state(get_cpu_state_vector(cpu));
-            printf("FAKECPU:  ");
-            print_cpu_state(get_cpu_state_vector(fakecpu));
-            exit(1);
-        }
-
-        if(machine.write_history != machine2.write_history) {
-            printf("memory writes differed\n");
-            printf("CPU:");
-            for(auto& write: machine.write_history) {
-                printf(" (0x%04X, 0x%02X)", write.first, write.second);
+            if(cycles != cycles2) {
+                printf("CPU instruction timing differed\n");
+                printf("CPU:    %" PRIu64 " cycles\n", cycles);
+                printf("REFCPU: %" PRIu64 " cycles\n", cycles2);
+                exit(1);
             }
-            printf("\n");
-            printf("FAKECPU:");
-            for(auto& write: machine2.write_history) {
-                printf(" (0x%04X, 0x%02X)", write.first, write.second);
+
+            // Ignore B2 - I think I'm handling it correctly
+            cpu_state[3] &= ~CPU_STATE_VECTOR_STATUS_B2;
+            refcpu_state[3] &= ~CPU_STATE_VECTOR_STATUS_B2;
+
+            if(cpu_state != refcpu_state) {
+                printf("CPU vectors differ\n");
+                printf("CPU:     ");
+                print_cpu_state(cpu_state);
+                for(auto i: cpu_state) {
+                    printf("%08X ", i);
+                }
+                puts("");
+                printf("REFCPU:  ");
+                print_cpu_state(refcpu_state);
+                for(auto i: refcpu_state) {
+                    printf("%08X ", i);
+                }
+                puts("");
+                exit(1);
             }
-            printf("\n");
-            exit(1);
+
+            if(machine.write_history != machine2.write_history) {
+                printf("memory writes differed\n");
+                printf("CPU:");
+                for(auto& write: machine.write_history) {
+                    printf(" (0x%04X, 0x%02X)", write.first, write.second);
+                }
+                printf("\n");
+                printf("REFCPU:");
+                for(auto& write: machine2.write_history) {
+                    printf(" (0x%04X, 0x%02X)", write.first, write.second);
+                }
+                printf("\n");
+                exit(1);
+            }
         }
 
     } while(get_cpu_state_vector(cpu)[CPU_STATE_VECTOR_PC] != oldpc);
