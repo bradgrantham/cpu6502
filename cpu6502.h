@@ -208,13 +208,43 @@ struct CPU6502
 
     void adc_bcd(uint8_t m, uint8_t carry)
     {
+#if 0
         uint8_t bcd_a = a / 16 * 10 + a % 16;
         uint8_t bcd_m = m / 16 * 10 + m % 16;
-        flag_change(C, ((uint16_t)bcd_a + (uint16_t)bcd_m + carry) > 99);
+        bool new_carry = ((uint16_t)bcd_a + (uint16_t)bcd_m + carry) > 127;
+        flag_change(C, new_carry);
         flag_change(V, adc_overflow_d(bcd_a, bcd_m, carry));
         bcd_a = bcd_a + bcd_m + carry;
         set_flags(N | Z, (bcd_a % 100));
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
+#else
+        uint8_t val = m;
+        uint8_t c = carry;
+        // Stolen from Flooh m6502.h
+        /* decimal mode (credit goes to MAME) */
+        p &= ~(N|V|Z|C);
+        uint8_t al = (a & 0x0F) + (val & 0x0F) + c;
+        if (al > 9) {
+            al += 6;
+        }
+        uint8_t ah = (a >> 4) + (val >> 4) + (al > 0x0F);
+        if (0 == (uint8_t)(a + val + c)) {
+            p |= Z;
+        }
+        else if (ah & 0x08) {
+            p |= N;
+        }
+        if (~(a^val) & (a^(ah<<4)) & 0x80) {
+            p |= V;
+        }
+        if (ah > 9) {
+            ah += 6;
+        }
+        if (ah > 15) {
+            p |= C;
+        }
+        a = (ah<<4) | (al & 0x0F);
+#endif
 #if EMULATE_65C02
         clk.add_cpu_cycles(1); // 1 more cycle for decimal mode on 65C02
 #endif /* EMULATE_65C02 */
@@ -222,6 +252,7 @@ struct CPU6502
 
     void sbc_bcd(uint8_t m, uint8_t borrow)
     {
+#if 0
         uint8_t bcd_a = a / 16 * 10 + a % 16;
         uint8_t bcd_m = m / 16 * 10 + m % 16;
         flag_change(C, !(bcd_a < bcd_m + borrow));
@@ -233,6 +264,35 @@ struct CPU6502
         }
         set_flags(N | Z, (bcd_a % 100));
         a = (bcd_a % 100) / 10 * 16 + bcd_a % 10;
+#else
+        uint8_t val = m;
+        uint8_t c = borrow;
+        // Stolen from Flooh m6502.h
+        /* decimal mode (credit goes to MAME) */
+        p &= ~(N|V|Z|C);
+        uint16_t diff = a - val - c;
+        uint8_t al = (a & 0x0F) - (val & 0x0F) - c;
+        if ((int8_t)al < 0) {
+            al -= 6;
+        }
+        uint8_t ah = (a>>4) - (val>>4) - ((int8_t)al < 0);
+        if (0 == (uint8_t)diff) {
+            p |= Z;
+        }
+        else if (diff & 0x80) {
+            p |= N;
+        }
+        if ((a^val) & (a^diff) & 0x80) {
+            p |= V;
+        }
+        if (!(diff & 0xFF00)) {
+            p |= C;
+        }
+        if (ah & 0x80) {
+            ah -= 6;
+        }
+        a = (ah<<4) | (al & 0x0F);
+#endif
 #if EMULATE_65C02
         clk.add_cpu_cycles(1); // 1 more cycle for decimal mode on 65C02
 #endif /* EMULATE_65C02 */
