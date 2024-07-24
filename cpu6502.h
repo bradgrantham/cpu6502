@@ -30,7 +30,13 @@
 #include <vector>
 
 #ifndef EMULATE_65C02
-#define EMULATE_65C02 0
+
+#define EMULATE_65C02 1
+
+#ifndef EMULATE_WDC_65C02
+#define EMULATE_WDC_65C02 1
+#endif /* EMULATE_WDC_65C02 */
+
 #endif /* EMULATE_65C02 */
 
 template<class CLK, class BUS>
@@ -1713,34 +1719,6 @@ struct CPU6502
 #if EMULATE_65C02
             // 65C02 instructions
 
-            case 0x0F: case 0x1F: case 0x2F: case 0x3F:
-            case 0x4F: case 0x5F: case 0x6F: case 0x7F: { // BBRn zpg, rel, 65C02
-                int whichbit = (inst >> 4) & 0x7;
-                uint8_t zpg = zeropage();
-                uint8_t m = read(zpg);
-                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
-                if(!(m & (1 << whichbit))) {
-                    // if((pc + rel) / 256 != pc / 256)
-                        // clk.add_cpu_cycles(1); // XXX ???
-                    pc += rel;
-                }
-                break;
-            }
-            
-            case 0x8F: case 0x9F: case 0xAF: case 0xBF:
-            case 0xCF: case 0xDF: case 0xEF: case 0xFF: { // BBSn zpg, rel, 65C02
-                int whichbit = (inst >> 4) & 0x7;
-                uint8_t zpg = zeropage();
-                uint8_t m = read(zpg);
-                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
-                if(m & (1 << whichbit)) {
-                    // if((pc + rel) / 256 != pc / 256)
-                        // clk.add_cpu_cycles(1); // XXX ???
-                    pc += rel;
-                }
-                break;
-            }
-            
             case 0x5A: { // PHY, 65C02
                 stack_push(y);
                 break;
@@ -1913,6 +1891,60 @@ struct CPU6502
                 break;
             }
 
+#if EMULATE_WDC_65C02
+
+            case 0x0F: case 0x1F: case 0x2F: case 0x3F:
+            case 0x4F: case 0x5F: case 0x6F: case 0x7F: { // BBRn zpg, rel, 65C02
+                int whichbit = (inst >> 4) & 0x7;
+                uint8_t zpg = zeropage();
+                uint8_t m = read(zpg);
+                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
+                if(!(m & (1 << whichbit))) {
+                    // if((pc + rel) / 256 != pc / 256)
+                        // clk.add_cpu_cycles(1); // XXX ???
+                    pc += rel;
+                }
+                break;
+            }
+            
+            case 0x8F: case 0x9F: case 0xAF: case 0xBF:
+            case 0xCF: case 0xDF: case 0xEF: case 0xFF: { // BBSn zpg, rel, WDC 65C02
+                int whichbit = (inst >> 4) & 0x7;
+                uint8_t zpg = zeropage();
+                uint8_t m = read(zpg);
+                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
+                if(m & (1 << whichbit)) {
+                    // if((pc + rel) / 256 != pc / 256)
+                        // clk.add_cpu_cycles(1); // XXX ???
+                    pc += rel;
+                }
+                break;
+            }
+            
+            case 0x07: case 0x17: case 0x27: case 0x37:
+            case 0x47: case 0x57: case 0x67: case 0x77: { // RMB0 zpg, WDC 65C02 instruction
+                int whichbit = (inst >> 4) & 0x7;
+                uint16_t addr = zeropage();
+                m = read(addr);
+                m &= ~(1 << whichbit);
+                clk.add_cpu_cycles(1);
+                write(addr, m);
+                break;
+            }
+
+            case 0x87: case 0x97: case 0xA7: case 0xB7:
+            case 0xC7: case 0xD7: case 0xE7: case 0xF7: { // RMB0 zpg, WDC 65C02 instruction
+                int whichbit = (inst >> 4) & 0x7;
+                uint16_t addr = zeropage();
+                m = read(addr);
+                m |= (1 << whichbit);
+                clk.add_cpu_cycles(1);
+                write(addr, m);
+                break;
+            }
+
+#endif /* EMULATE_WDC_65C02 */
+
 #else /* ! EMULATE_65C02 */
 
             case 0x04: { // NOP zpg
@@ -1922,6 +1954,7 @@ struct CPU6502
             }
 
 #endif /* EMULATE_65C02 */
+
 
             default: {
                 printf("unhandled instruction %02X at %04X\n", inst, pc - 1);
