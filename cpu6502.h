@@ -1898,7 +1898,7 @@ struct CPU6502
                 int whichbit = (inst >> 4) & 0x7;
                 uint8_t zpg = zeropage();
                 uint8_t m = read(zpg);
-                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
+                int32_t rel = ((read_pc_inc() + 128)) & 0xFF - 128;
                 if(!(m & (1 << whichbit))) {
                     // if((pc + rel) / 256 != pc / 256)
                         // clk.add_cpu_cycles(1); // XXX ???
@@ -1912,7 +1912,7 @@ struct CPU6502
                 int whichbit = (inst >> 4) & 0x7;
                 uint8_t zpg = zeropage();
                 uint8_t m = read(zpg);
-                int32_t rel = (read_pc_inc() + 128) & 0xFF - 128;
+                int32_t rel = ((read_pc_inc() + 128)) & 0xFF - 128;
                 if(m & (1 << whichbit)) {
                     // if((pc + rel) / 256 != pc / 256)
                         // clk.add_cpu_cycles(1); // XXX ???
